@@ -2,8 +2,13 @@ import pandas as pd
 import time
 import requests
 import bs4 as bs
+import schedule
+import logging
 from polygon import RESTClient
 from config import API_KEY
+
+logging.basicConfig(filename='daily_scan_results.log', level=logging.INFO,
+                    format='%(asctime)s - %(message)s')
 
 def get_sp500_tickers():
     """Scrapes the list of S&P 500 tickers from Wikipedia."""
@@ -12,7 +17,7 @@ def get_sp500_tickers():
     soup = bs.BeautifulSoup(resp.text, 'lxml')
     table = soup.find('table', {'class': 'wikitable'})
     if table is None:
-        print("Error: Could not find the S&P 500 table on the Wikipedia page.")
+        logging.error("Could not find the S&P 500 table on the Wikipedia page.")
         return []
     tickers = []
     for row in table.find_all('tr')[1:]:
@@ -53,14 +58,14 @@ def calculate_rsi(df, window=14):
     df['rsi'] = 100 - (100 / (1 + rs))
     return df
 
-def main():
-    """Main function to run the stock scanner."""
+def run_scan():
+    """Runs the stock scanner."""
+    logging.info("Starting new scan...")
     tickers = get_sp500_tickers()
-    print(f"Scanning {len(tickers)} tickers...")
+    logging.info(f"Scanning {len(tickers)} tickers...")
 
     client = RESTClient(API_KEY)
 
-    print("Scanning for stocks that are below the lower Bollinger Band and have an RSI < 30...")
     for ticker in tickers:
         daily_data = fetch_daily_data(client, ticker)
         if not daily_data.empty:
@@ -70,12 +75,21 @@ def main():
             latest_data = daily_data.iloc[-1]
 
             if latest_data['close'] < latest_data['bb_lower'] and latest_data['rsi'] < 30:
-                print(f"ALERT for {ticker}:")
-                print(f"  - Price: {latest_data['close']} is below Lower Bollinger Band: {latest_data['bb_lower']:.2f}")
-                print(f"  - RSI: {latest_data['rsi']:.2f} is below 30")
-                print("-" * 30)
+                logging.info(f"ALERT for {ticker}:")
+                logging.info(f"  - Price: {latest_data['close']} is below Lower Bollinger Band: {latest_data['bb_lower']:.2f}")
+                logging.info(f"  - RSI: {latest_data['rsi']:.2f} is below 30")
+                logging.info("-" * 30)
 
         time.sleep(13) # Wait for 13 seconds to avoid rate limiting (5 req/min).
+    logging.info("Scan complete.")
+
+def main():
+    """Main function to schedule the stock scanner."""
+    schedule.every().day.at("08:00").do(run_scan)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()
